@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>PhoneCam – Security Camera</title>
+<style>
+  :root{--bg:#0e1116;--panel:#171b22;--line:#2a303b;--text:#e8ebf0;--muted:#8b93a1;--accent:#3ea6ff;--alert:#ff4d4f;--ok:#37c871}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:720px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:8px 0 4px}
+  h2{font-size:16px;margin:0 0 10px}
+  p.sub{color:var(--muted);margin:0 0 16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#0b0e13;color:var(--text);font-size:15px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>*{flex:1 1 140px}
+  button{appearance:none;border:0;border-radius:10px;padding:12px 14px;font-size:15px;font-weight:600;background:#262c36;color:var(--text);cursor:pointer}
+  button.primary{background:var(--accent);color:#04121f}
+  button.danger{background:var(--alert);color:#fff}
+  button:disabled{opacity:.5}
+  .big{width:100%;padding:16px;font-size:17px;margin-top:8px}
+  .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .stage{position:relative;width:100%;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3}
+  .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  .badge{position:absolute;top:10px;left:10px;padding:5px 10px;border-radius:999px;font-size:12.5px;font-weight:700;background:rgba(0,0,0,.6)}
+  .badge.live{color:var(--ok)} .badge.alert{background:var(--alert);color:#fff}
+  .stat{position:absolute;top:10px;right:10px;padding:5px 10px;border-radius:999px;font-size:12px;background:rgba(0,0,0,.6);color:#cfd5de}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  .bar button{flex:1 1 auto}
+  .link{word-break:break-all;background:#0b0e13;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px}
+  .events{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .ev{background:#0b0e13;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:12px}
+  .ev img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:#000}
+  .ev div{padding:6px 8px;color:var(--muted)}
+  .log{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--muted);max-height:140px;overflow:auto;white-space:pre-wrap}
+  #blackout{position:fixed;inset:0;background:#000;z-index:99;display:none;align-items:flex-end;justify-content:center;color:#222;font-size:12px;padding-bottom:20px}
+  .hidden{display:none!important}
+  .toggle{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--text);font-size:14px}
+  .toggle input{width:auto}
+</style>
+</head>
+<body>
+
+<!-- ============ HOME / SETUP ============ -->
+<div id="home" class="wrap hidden">
+  <h1>📷 PhoneCam</h1>
+  <p class="sub">Turn an old phone into a security camera that detects people, sends alerts with a snapshot, and streams live video.</p>
+
+  <div class="card">
+    <h2>Settings</h2>
+    <label>Camera ID (keep this secret, since anyone with it can watch)</label>
+    <div class="row"><input id="room"><button id="newRoom" style="flex:0 0 auto">New</button></div>
+
+    <label>ntfy topic for push notifications (install the free “ntfy” app and subscribe to this)</label>
+    <div class="row"><input id="topic"><button id="testNtfy" style="flex:0 0 auto">Test</button></div>
+
+    <label>ntfy server</label>
+    <input id="server" value="https://ntfy.sh">
+
+    <label>Internet viewer page</label>
+    <input id="publicUrl" placeholder="https://treecrabwill.github.io/phonecam/">
+    <p class="hint">Lets you watch from anywhere. Clear it to use only the home Wi-Fi link.</p>
+
+    <div class="row">
+      <div><label>Sensitivity</label>
+        <select id="threshold">
+          <option value="0.45">High (more alerts)</option>
+          <option value="0.55" selected>Normal</option>
+          <option value="0.7">Low (fewer false alarms)</option>
+        </select></div>
+      <div><label>Alert cooldown</label>
+        <select id="cooldown">
+          <option value="30">30 seconds</option>
+          <option value="60" selected>1 minute</option>
+          <option value="180">3 minutes</option>
+          <option value="600">10 minutes</option>
+        </select></div>
+      <div><label>Check every</label>
+        <select id="interval">
+          <option value="300">0.3 s (newer phone)</option>
+          <option value="700" selected>0.7 s</option>
+          <option value="1500">1.5 s (very old phone)</option>
+        </select></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="mic"> Include microphone audio in live feed</label>
+  </div>
+
+  <button class="primary big" id="startCam">▶ Start as CAMERA (on the old phone)</button>
+  <button class="big" id="startView">👁 Open VIEWER (on your own phone)</button>
+  <p class="hint">Keep the camera phone plugged in. Press “Black screen” after starting to save power. Detection keeps running.</p>
+</div>
+
+<!-- ============ CAMERA ============ -->
+<div id="cam" class="wrap hidden">
+  <div class="stage" id="camStage">
+    <video id="camVideo" autoplay muted playsinline></video>
+    <canvas id="camOverlay"></canvas>
+    <div class="badge live" id="camBadge">Starting…</div>
+    <div class="stat" id="camStat"></div>
+  </div>
+  <div class="bar">
+    <button id="blackBtn">🌑 Black screen</button>
+    <button id="flipBtn">🔄 Switch camera</button>
+    <button id="armBtn">🔔 Alerts ON</button>
+    <button id="stopCam" class="danger">Stop</button>
+  </div>
+  <div class="card">
+    <h2>Watch from anywhere</h2>
+    <div class="link" id="viewLink"></div>
+    <div class="bar"><button id="copyLink">Copy viewer link</button></div>
+    <p class="hint">Open this link on your own phone. It is also attached to every alert, so tapping a notification opens the live feed.</p>
+  </div>
+  <div class="card"><h2>Recent detections</h2><div class="events" id="camEvents"></div></div>
+  <div class="card"><h2>Log</h2><div class="log" id="camLog"></div></div>
+</div>
+<div id="blackout">double-tap to wake</div>
+
+<!-- ============ VIEWER ============ -->
+<div id="view" class="wrap hidden">
+  <div class="stage">
+    <video id="viewVideo" autoplay playsinline muted></video>
+    <div class="badge" id="viewBadge">Connecting…</div>
+    <div class="stat" id="viewStat"></div>
+  </div>
+  <div class="bar">
+    <button id="unmuteBtn">🔇 Unmute</button>
+    <button id="snapBtn">📸 Save snapshot</button>
+    <button id="fsBtn">⛶ Fullscreen</button>
+    <button id="homeBtn">⚙ Home</button>
+  </div>
+  <div class="card"><h2>Recent detections</h2><div class="events" id="viewEvents"><span class="hint">None yet.</span></div></div>
+</div>
+
+<script>
+/* =====================================================================
+   PhoneCam: a single-file security camera.
+   - Person detection: TensorFlow.js + COCO-SSD (runs on the phone)
+   - Push alerts:      ntfy (https://ntfy.sh), free with no account; snapshot attached
+   - Live feed:        WebRTC peer-to-peer via PeerJS (free public broker)
+   ===================================================================== */
+
+const LIBS = {
+  tf:     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
+  coco:   'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js',
+  peerjs: 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'
+};
+const ID_PREFIX = 'phonecam-v1-';
+// Viewer page hosted free on GitHub Pages (built from this repo).
+const DEFAULT_PUBLIC_URL = 'https://treecrabwill.github.io/phonecam/';
+const $ = id => document.getElementById(id);
+
+/* ---------- small helpers ---------- */
+function loadScript(src){
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`)) return res();
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+function randId(n = 10){
+  const a = 'abcdefghjkmnpqrstuvwxyz23456789'; let s = '';
+  const r = crypto.getRandomValues(new Uint8Array(n));
+  for (const x of r) s += a[x % a.length];
+  return s;
+}
+const store = {
+  get(k, d){ try { const v = localStorage.getItem('phonecam.' + k); return v === null ? d : v; } catch { return d; } },
+  set(k, v){ try { localStorage.setItem('phonecam.' + k, v); } catch {} }
+};
+function timeStr(t){ return new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+const IN_APP = !!window.PhoneCamApp;
+function lanBase(){ try { return IN_APP ? window.PhoneCamApp.getLanUrl() : ''; } catch { return ''; } }
+function baseUrl(){
+  if (S.publicUrl) return S.publicUrl.split('#')[0];
+  if (IN_APP) return lanBase() || location.href.split('#')[0];
+  return location.href.split('#')[0];
+}
+function viewerUrl(room){ return baseUrl() + '#view=' + room; }
+function show(id){ for (const s of ['home','cam','view']) $(s).classList.toggle('hidden', s !== id); }
+
+/* ---------- settings ---------- */
+const S = {};
+function loadSettings(){
+  S.room = store.get('room', randId());
+  S.topic = store.get('topic', 'phonecam-' + randId(14));
+  S.server = store.get('server', 'https://ntfy.sh');
+  S.threshold = store.get('threshold', '0.55');
+  S.cooldown = store.get('cooldown', '60');
+  S.interval = store.get('interval', '700');
+  S.mic = store.get('mic', '0') === '1';
+  S.publicUrl = store.get('publicUrl', DEFAULT_PUBLIC_URL);
+  $('publicUrl').value = S.publicUrl;
+  for (const k of ['room','topic','server','threshold','cooldown','interval']) $(k).value = S[k];
+  $('mic').checked = S.mic;
+}
+function saveSettings(){
+  S.room = $('room').value.trim().replace(/[^A-Za-z0-9_-]/g, '') || randId();
+  S.topic = $('topic').value.trim().replace(/[^A-Za-z0-9_-]/g, '') || ('phonecam-' + randId(14));
+  S.server = ($('server').value.trim() || 'https://ntfy.sh').replace(/\/+$/, '');
+  S.threshold = $('threshold').value; S.cooldown = $('cooldown').value; S.interval = $('interval').value;
+  S.mic = $('mic').checked;
+  let pu = $('publicUrl').value.trim();
+  if (pu && !/^https?:\/\//i.test(pu)) pu = 'https://' + pu;
+  if (pu && !pu.split('#')[0].endsWith('/') && !/\.html?$/i.test(pu.split('#')[0])) pu = pu.split('#')[0] + '/';
+  S.publicUrl = pu; store.set('publicUrl', pu); $('publicUrl').value = pu;
+  for (const k of ['room','topic','server','threshold','cooldown','interval']) { store.set(k, S[k]); $(k).value = S[k]; }
+  store.set('mic', S.mic ? '1' : '0');
+}
+
+/* ---------- ntfy ---------- */
+async function sendNtfy({ title, message, blob, click }){
+  const headers = { 'Title': title, 'Tags': 'rotating_light', 'Priority': 'high' };
+  if (click) headers['Click'] = click;
+  let body = message;
+  if (blob){ headers['Filename'] = 'snapshot.jpg'; headers['Message'] = message; body = blob; }
+  const r = await fetch(`${S.server}/${encodeURIComponent(S.topic)}`, { method: 'PUT', body, headers });
+  if (!r.ok) throw new Error('ntfy HTTP ' + r.status);
+}
+
+/* =====================================================================
+   CAMERA MODE
+   ===================================================================== */
+const C = {
+  stream: null, model: null, peer: null, conns: new Set(), calls: new Set(),
+  facing: 'environment', armed: true, running: false,
+  personStreak: 0, lastAlert: 0, events: [], wakeLock: null, retryTimer: null, fps: 0
+};
+
+function camLog(msg){
+  const el = $('camLog');
+  el.textContent = `[${timeStr(Date.now())}] ${msg}\n` + el.textContent.slice(0, 4000);
+}
+
+async function getStream(){
+  const constraints = {
+    video: { facingMode: C.facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: S.mic
+  };
+  try { return await navigator.mediaDevices.getUserMedia(constraints); }
+  catch (e){
+    if (S.mic){ camLog('Microphone unavailable, continuing with video only'); return navigator.mediaDevices.getUserMedia({ video: constraints.video, audio: false }); }
+    throw e;
+  }
+}
+
+async function startCamera(){
+  saveSettings();
+  show('cam');
+  store.set('autostart', '1');
+  const lines = [];
+  if (S.publicUrl) lines.push('🌍 From anywhere:\n' + S.publicUrl.split('#')[0] + '#view=' + S.room);
+  if (IN_APP && lanBase()) lines.push('🏠 On the same Wi-Fi:\n' + lanBase() + '#view=' + S.room);
+  if (!lines.length) lines.push(viewerUrl(S.room));
+  $('viewLink').style.whiteSpace = 'pre-wrap';
+  $('viewLink').textContent = lines.join('\n\n');
+  $('camBadge').textContent = 'Starting camera…';
+  if (!window.isSecureContext){ alert('This page must be opened over HTTPS for camera access. See the setup notes.'); }
+  try {
+    C.stream = await getStream();
+  } catch (e){
+    $('camBadge').textContent = 'Camera blocked';
+    camLog('Camera error: ' + e.message);
+    alert('Could not open the camera: ' + e.message);
+    return;
+  }
+  const v = $('camVideo');
+  v.srcObject = C.stream;
+  await new Promise(r => v.onloadedmetadata = r);
+  v.play().catch(()=>{});
+  sizeOverlay();
+  C.running = true;
+  keepAwake();
+  startPeer();
+  $('camBadge').textContent = 'Loading AI model…';
+  try {
+    await loadScript(LIBS.tf);
+    await loadScript(LIBS.coco);
+    try { await tf.setBackend('webgl'); } catch { await tf.setBackend('cpu'); }
+    await tf.ready();
+    C.model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    camLog('Model loaded (backend: ' + tf.getBackend() + ')');
+  } catch (e){
+    camLog('Model failed: ' + e.message);
+    $('camBadge').textContent = 'AI failed to load, live feed only';
+    return;
+  }
+  $('camBadge').textContent = 'Watching';
+  detectLoop();
+  battery();
+}
+
+function sizeOverlay(){
+  const v = $('camVideo'), c = $('camOverlay');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  $('camStage').style.aspectRatio = `${v.videoWidth}/${v.videoHeight}`;
+}
+
+async function detectLoop(){
+  if (!C.running) return;
+  const t0 = performance.now();
+  const v = $('camVideo');
+  try {
+    if (v.readyState >= 2 && C.model){
+      const preds = await C.model.detect(v, 10, 0.3);
+      const people = preds.filter(p => p.class === 'person' && p.score >= parseFloat(S.threshold));
+      drawBoxes(people);
+      handleDetections(people);
+    }
+  } catch (e){ camLog('Detect error: ' + e.message); }
+  const dt = performance.now() - t0;
+  C.fps = Math.round(1000 / Math.max(dt, 1));
+  $('camStat').textContent = `${Math.round(dt)} ms/check · ${C.conns.size} viewer${C.conns.size === 1 ? '' : 's'}`;
+  setTimeout(detectLoop, Math.max(50, parseInt(S.interval) - dt));
+}
+
+function drawBoxes(people){
+  const c = $('camOverlay'), g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  g.lineWidth = Math.max(2, c.width / 250);
+  g.font = `${Math.max(14, c.width / 40)}px system-ui`;
+  for (const p of people){
+    const [x, y, w, h] = p.bbox;
+    g.strokeStyle = '#ff4d4f'; g.strokeRect(x, y, w, h);
+    g.fillStyle = '#ff4d4f';
+    const label = `person ${Math.round(p.score * 100)}%`;
+    g.fillRect(x, y - parseInt(g.font) - 6, g.measureText(label).width + 10, parseInt(g.font) + 6);
+    g.fillStyle = '#fff'; g.fillText(label, x + 5, y - 6);
+  }
+}
+
+function handleDetections(people){
+  const badge = $('camBadge');
+  if (people.length){
+    C.personStreak++;
+    badge.textContent = `Person detected (${people.length})`; badge.className = 'badge alert';
+  } else {
+    C.personStreak = 0;
+    badge.textContent = C.armed ? 'Watching' : 'Watching (alerts off)'; badge.className = 'badge live';
+  }
+  broadcast({ type: 'status', people: people.length, armed: C.armed });
+
+  // require 2 consecutive positive checks to cut down false alarms
+  const now = Date.now();
+  if (C.personStreak >= 2 && now - C.lastAlert > parseInt(S.cooldown) * 1000){
+    C.lastAlert = now;
+    triggerAlert(people);
+  }
+}
+
+function snapshot(maxW = 1280, quality = 0.75, withBoxes = true){
+  const v = $('camVideo');
+  const scale = Math.min(1, maxW / v.videoWidth);
+  const c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
+  const g = c.getContext('2d');
+  g.drawImage(v, 0, 0, c.width, c.height);
+  if (withBoxes) g.drawImage($('camOverlay'), 0, 0, c.width, c.height);
+  g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, c.height - 26, 210, 26);
+  g.fillStyle = '#fff'; g.font = '15px system-ui';
+  g.fillText(new Date().toLocaleString(), 8, c.height - 8);
+  return c;
+}
+const toBlob = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q));
+
+async function triggerAlert(people){
+  const n = people.length;
+  const t = Date.now();
+  const thumb = snapshot(320, 0.6).toDataURL('image/jpeg', 0.6);
+  const ev = { t, n, thumb };
+  C.events.unshift(ev); C.events = C.events.slice(0, 20);
+  renderEvents($('camEvents'), C.events);
+  broadcast({ type: 'event', ev });
+  camLog(`ALERT: ${n} person(s) detected`);
+  if (!C.armed) return;
+  try {
+    const blob = await toBlob(snapshot(1280, 0.75), 0.75);
+    await sendNtfy({
+      title: '🚨 Person detected',
+      message: `${n} person${n > 1 ? 's' : ''} seen at ${timeStr(t)}. Tap to view live.`,
+      blob, click: viewerUrl(S.room)
+    });
+    camLog('Notification sent');
+  } catch (e){ camLog('Notification failed: ' + e.message); }
+}
+
+/* ---- live streaming (PeerJS / WebRTC) ---- */
+async function startPeer(){
+  try { await loadScript(LIBS.peerjs); } catch (e){ camLog('PeerJS failed to load, live feed unavailable'); return; }
+  connectPeer();
+}
+function connectPeer(){
+  clearTimeout(C.retryTimer);
+  if (C.peer && !C.peer.destroyed) C.peer.destroy();
+  const peer = new Peer(ID_PREFIX + S.room, { debug: 1 });
+  C.peer = peer;
+  peer.on('open', () => camLog('Live feed online, waiting for viewers'));
+  peer.on('connection', conn => {
+    conn.on('open', () => {
+      C.conns.add(conn);
+      camLog('Viewer connected');
+      conn.send({ type: 'hello', events: C.events, armed: C.armed });
+      const call = peer.call(conn.peer, C.stream);
+      C.calls.add(call);
+      call.on('close', () => C.calls.delete(call));
+      call.on('error', () => C.calls.delete(call));
+    });
+    conn.on('data', d => onViewerMsg(conn, d));
+    conn.on('close', () => { C.conns.delete(conn); camLog('Viewer left'); });
+    conn.on('error', () => C.conns.delete(conn));
+  });
+  peer.on('disconnected', () => { if (C.running && !peer.destroyed) { camLog('Broker connection lost, reconnecting…'); setTimeout(() => !peer.destroyed && peer.reconnect(), 2000); } });
+  peer.on('error', e => {
+    camLog('Live feed error: ' + e.type);
+    if (['unavailable-id','network','server-error','socket-error','socket-closed'].includes(e.type) && C.running){
+      C.retryTimer = setTimeout(connectPeer, e.type === 'unavailable-id' ? 8000 : 5000);
+    }
+  });
+}
+function broadcast(msg){ for (const c of C.conns) { try { c.open && c.send(msg); } catch {} } }
+function onViewerMsg(conn, d){
+  if (d && d.type === 'snap'){
+    conn.send({ type: 'snap', data: snapshot(1920, 0.9, false).toDataURL('image/jpeg', 0.9) });
+  }
+}
+
+async function flipCamera(){
+  C.facing = C.facing === 'environment' ? 'user' : 'environment';
+  const old = C.stream;
+  try { C.stream = await getStream(); }
+  catch (e){ camLog('Switch failed: ' + e.message); C.facing = C.facing === 'environment' ? 'user' : 'environment'; return; }
+  $('camVideo').srcObject = C.stream;
+  await new Promise(r => $('camVideo').onloadedmetadata = r);
+  sizeOverlay();
+  for (const call of C.calls){
+    const pc = call.peerConnection; if (!pc) continue;
+    for (const sender of pc.getSenders()){
+      const nt = C.stream.getTracks().find(t => sender.track && t.kind === sender.track.kind);
+      if (nt) sender.replaceTrack(nt);
+    }
+  }
+  old.getTracks().forEach(t => t.stop());
+  camLog('Switched to ' + (C.facing === 'user' ? 'front' : 'back') + ' camera');
+}
+
+async function keepAwake(){
+  try {
+    if ('wakeLock' in navigator){ C.wakeLock = await navigator.wakeLock.request('screen'); camLog('Screen will stay on'); }
+    else camLog('Wake Lock not supported, set screen timeout to "never" in phone settings');
+  } catch (e){ camLog('Wake lock failed: ' + e.message); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && C.running) keepAwake();
+  if (document.visibilityState === 'hidden' && C.running) camLog('⚠ Page hidden. Detection may pause. Keep this page open on screen.');
+});
+
+async function battery(){
+  if (!navigator.getBattery) return;
+  const b = await navigator.getBattery();
+  const send = () => broadcast({ type: 'battery', level: Math.round(b.level * 100), charging: b.charging });
+  b.addEventListener('levelchange', send); b.addEventListener('chargingchange', send);
+  setInterval(send, 30000);
+  b.addEventListener('levelchange', () => {
+    if (!b.charging && b.level <= 0.15 && !C.lowBattSent){
+      C.lowBattSent = true;
+      sendNtfy({ title: '🔋 Camera battery low', message: `Battery at ${Math.round(b.level*100)}%. Plug in the camera phone.` }).catch(()=>{});
+    }
+    if (b.charging) C.lowBattSent = false;
+  });
+}
+
+function stopCamera(){
+  C.running = false;
+  store.set('autostart', '0');
+  clearTimeout(C.retryTimer);
+  if (C.peer) C.peer.destroy();
+  C.conns.clear(); C.calls.clear();
+  if (C.stream) C.stream.getTracks().forEach(t => t.stop());
+  if (C.wakeLock) C.wakeLock.release().catch(()=>{});
+  show('home');
+}
+
+/* =====================================================================
+   VIEWER MODE
+   ===================================================================== */
+const V = { peer: null, conn: null, room: null, retry: null, events: [], lastStatus: 0 };
+
+function setViewBadge(text, cls){ const b = $('viewBadge'); b.textContent = text; b.className = 'badge ' + (cls || ''); }
+
+async function startViewer(room){
+  V.room = room;
+  show('view');
+  setViewBadge('Loading…');
+  try { await loadScript(LIBS.peerjs); } catch { setViewBadge('Could not load streaming library'); return; }
+  V.peer = new Peer({ debug: 1 });
+  V.peer.on('open', viewerConnect);
+  V.peer.on('call', call => {
+    call.answer();
+    call.on('stream', s => { $('viewVideo').srcObject = s; $('viewVideo').play().catch(()=>{}); setViewBadge('● LIVE', 'live'); });
+    call.on('close', viewerLost);
+  });
+  V.peer.on('disconnected', () => setTimeout(() => !V.peer.destroyed && V.peer.reconnect(), 2000));
+  V.peer.on('error', e => {
+    if (e.type === 'peer-unavailable') setViewBadge('Camera offline, retrying…');
+    else setViewBadge('Error: ' + e.type + ', retrying…');
+    scheduleRetry();
+  });
+  setInterval(() => { // stale-link watchdog
+    if (V.conn && V.conn.open && Date.now() - V.lastStatus > 15000) { setViewBadge('No signal, reconnecting…'); viewerConnect(); }
+  }, 5000);
+}
+function viewerConnect(){
+  clearTimeout(V.retry);
+  if (V.conn) try { V.conn.close(); } catch {}
+  setViewBadge('Connecting to camera…');
+  V.lastStatus = Date.now();
+  const conn = V.peer.connect(ID_PREFIX + V.room, { reliable: true });
+  V.conn = conn;
+  conn.on('data', onCamMsg);
+  conn.on('close', viewerLost);
+  conn.on('error', viewerLost);
+}
+function viewerLost(){ setViewBadge('Disconnected, retrying…'); scheduleRetry(); }
+function scheduleRetry(){ clearTimeout(V.retry); V.retry = setTimeout(() => { if (V.peer && !V.peer.destroyed && V.peer.open) viewerConnect(); }, 5000); }
+
+let battText = '';
+function onCamMsg(d){
+  if (!d || !d.type) return;
+  V.lastStatus = Date.now();
+  if (d.type === 'hello'){ V.events = d.events || []; renderEvents($('viewEvents'), V.events); }
+  if (d.type === 'event'){ V.events.unshift(d.ev); V.events = V.events.slice(0, 20); renderEvents($('viewEvents'), V.events); }
+  if (d.type === 'status' && $('viewVideo').srcObject){
+    if (d.people) setViewBadge(`🚨 Person detected (${d.people})`, 'alert'); else setViewBadge('● LIVE', 'live');
+    $('viewStat').textContent = (d.armed ? 'Alerts on' : 'Alerts off') + battText;
+  }
+  if (d.type === 'battery'){ battText = ` · 🔋 ${d.level}%${d.charging ? '⚡' : ''}`; }
+  if (d.type === 'snap'){
+    const a = document.createElement('a');
+    a.href = d.data; a.download = `phonecam-${new Date().toISOString().replace(/[:.]/g,'-')}.jpg`;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+}
+
+function renderEvents(el, events){
+  el.innerHTML = '';
+  if (!events.length){ el.innerHTML = '<span class="hint">None yet.</span>'; return; }
+  for (const e of events){
+    const d = document.createElement('div'); d.className = 'ev';
+    const img = document.createElement('img'); img.src = e.thumb; img.alt = 'detection';
+    const cap = document.createElement('div');
+    cap.textContent = `${new Date(e.t).toLocaleDateString([], {month:'short', day:'numeric'})} ${timeStr(e.t)} · ${e.n} person${e.n > 1 ? 's' : ''}`;
+    d.append(img, cap); el.appendChild(d);
+  }
+}
+
+/* =====================================================================
+   WIRING
+   ===================================================================== */
+$('newRoom').onclick = () => { $('room').value = randId(); };
+$('testNtfy').onclick = async () => {
+  saveSettings();
+  try { await sendNtfy({ title: '✅ PhoneCam test', message: 'Notifications are working!' }); alert('Test sent to topic "' + S.topic + '". Check the ntfy app.'); }
+  catch (e){ alert('Failed: ' + e.message); }
+};
+$('startCam').onclick = startCamera;
+$('startView').onclick = () => { saveSettings(); location.hash = 'view=' + S.room; };
+$('stopCam').onclick = stopCamera;
+$('flipBtn').onclick = flipCamera;
+$('armBtn').onclick = () => { C.armed = !C.armed; $('armBtn').textContent = C.armed ? '🔔 Alerts ON' : '🔕 Alerts OFF'; };
+$('copyLink').onclick = async () => {
+  try { await navigator.clipboard.writeText(viewerUrl(S.room)); $('copyLink').textContent = 'Copied!'; }
+  catch { prompt('Copy this link:', viewerUrl(S.room)); }
+  setTimeout(() => $('copyLink').textContent = 'Copy viewer link', 1500);
+};
+$('blackBtn').onclick = () => { $('blackout').style.display = 'flex'; };
+$('blackout').ondblclick = () => { $('blackout').style.display = 'none'; };
+let lastTap = 0;
+$('blackout').addEventListener('touchend', e => { const n = Date.now(); if (n - lastTap < 400) $('blackout').style.display = 'none'; lastTap = n; e.preventDefault(); });
+
+$('unmuteBtn').onclick = () => { const v = $('viewVideo'); v.muted = !v.muted; $('unmuteBtn').textContent = v.muted ? '🔇 Unmute' : '🔊 Mute'; };
+$('snapBtn').onclick = () => { if (V.conn && V.conn.open) V.conn.send({ type: 'snap' }); };
+$('fsBtn').onclick = () => { const v = $('viewVideo'); (v.requestFullscreen || v.webkitEnterFullscreen || (()=>{})).call(v); };
+$('homeBtn').onclick = () => { location.hash = ''; location.reload(); };
+
+function route(){
+  const m = location.hash.match(/view=([A-Za-z0-9_-]+)/);
+  if (m) { startViewer(m[1]); return; }
+  loadSettings();
+  if (IN_APP){
+    $('startView').classList.add('hidden');
+    // the app resumes watching automatically if it was running before (e.g. after a restart)
+    if (store.get('autostart', '0') === '1') { startCamera(); return; }
+  }
+  show('home');
+}
+window.addEventListener('hashchange', () => location.reload());
+route();
+</script>
+</body>
+</html>

@@ -51,9 +51,6 @@ jobs:
 
   viewer:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare site
@@ -62,5 +59,13 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site
+
+  deploy-viewer:
+    needs: viewer
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4

@@ -1,6 +1,6 @@
 # PhoneCam: old Android phone → security camera
 
-- On-device AI detects people and sends a push alert with a snapshot (free **ntfy** app)
+- On-device AI detects cats and sends a push alert with a snapshot (free **ntfy** app)
 - Live video you can watch in any browser, at home or away
 
 ## Install

@@ -26,6 +26,8 @@
   .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
   .stage{position:relative;width:100%;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3}
   .stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  .stage:fullscreen{aspect-ratio:auto!important;border-radius:0}
+  .rot{position:absolute;left:50%;top:50%;width:100%;height:100%;transform:translate(-50%,-50%)}
   .badge{position:absolute;top:10px;left:10px;padding:5px 10px;border-radius:999px;font-size:12.5px;font-weight:700;background:rgba(0,0,0,.6)}
   .badge.live{color:var(--ok)} .badge.alert{background:var(--alert);color:#fff}
   .stat{position:absolute;top:10px;right:10px;padding:5px 10px;border-radius:999px;font-size:12px;background:rgba(0,0,0,.6);color:#cfd5de}
@@ -48,7 +50,7 @@
 <!-- ============ HOME / SETUP ============ -->
 <div id="home" class="wrap hidden">
   <h1>📷 PhoneCam</h1>
-  <p class="sub">Turn an old phone into a security camera that detects people, sends alerts with a snapshot, and streams live video.</p>
+  <p class="sub">Turn an old phone into a security camera that detects cats, sends alerts with a snapshot, and streams live video.</p>
 
   <div class="card">
     <h2>Settings</h2>
@@ -97,13 +99,16 @@
 <!-- ============ CAMERA ============ -->
 <div id="cam" class="wrap hidden">
   <div class="stage" id="camStage">
-    <video id="camVideo" autoplay muted playsinline></video>
-    <canvas id="camOverlay"></canvas>
+    <div class="rot" id="camRot">
+      <video id="camVideo" autoplay muted playsinline></video>
+      <canvas id="camOverlay"></canvas>
+    </div>
     <div class="badge live" id="camBadge">Starting…</div>
     <div class="stat" id="camStat"></div>
   </div>
   <div class="bar">
     <button id="blackBtn">🌑 Black screen</button>
+    <button id="rotBtn">↻ Rotate</button>
     <button id="flipBtn">🔄 Switch camera</button>
     <button id="armBtn">🔔 Alerts ON</button>
     <button id="stopCam" class="danger">Stop</button>
@@ -121,8 +126,8 @@
 
 <!-- ============ VIEWER ============ -->
 <div id="view" class="wrap hidden">
-  <div class="stage">
-    <video id="viewVideo" autoplay playsinline muted></video>
+  <div class="stage" id="viewStage">
+    <div class="rot" id="viewRot"><video id="viewVideo" autoplay playsinline muted></video></div>
     <div class="badge" id="viewBadge">Connecting…</div>
     <div class="stat" id="viewStat"></div>
   </div>
@@ -138,7 +143,7 @@
 <script>
 /* =====================================================================
    PhoneCam: a single-file security camera.
-   - Person detection: TensorFlow.js + COCO-SSD (runs on the phone)
+   - Cat detection:    TensorFlow.js + COCO-SSD (runs on the phone)
    - Push alerts:      ntfy (https://ntfy.sh), free with no account; snapshot attached
    - Live feed:        WebRTC peer-to-peer via PeerJS (free public broker)
    ===================================================================== */
@@ -149,6 +154,9 @@ const LIBS = {
   peerjs: 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'
 };
 const ID_PREFIX = 'phonecam-v1-';
+// What to watch for (any COCO-SSD class works, e.g. 'person', 'dog', 'cat').
+const TARGET = 'cat';
+const plural = n => n === 1 ? TARGET : TARGET + 's';
 // Viewer page hosted free on GitHub Pages (built from this repo).
 const DEFAULT_PUBLIC_URL = 'https://treecrabwill.github.io/phonecam/';
 const $ = id => document.getElementById(id);
@@ -214,7 +222,7 @@ function saveSettings(){
 
 /* ---------- ntfy ---------- */
 async function sendNtfy({ title, message, blob, click }){
-  const headers = { 'Title': title, 'Tags': 'rotating_light', 'Priority': 'high' };
+  const headers = { 'Title': title, 'Tags': 'cat', 'Priority': 'high' };
   if (click) headers['Click'] = click;
   let body = message;
   if (blob){ headers['Filename'] = 'snapshot.jpg'; headers['Message'] = message; body = blob; }
@@ -228,7 +236,7 @@ async function sendNtfy({ title, message, blob, click }){
 const C = {
   stream: null, model: null, peer: null, conns: new Set(), calls: new Set(),
   facing: 'environment', armed: true, running: false,
-  personStreak: 0, lastAlert: 0, events: [], wakeLock: null, retryTimer: null, fps: 0
+  personStreak: 0, lastAlert: 0, rotation: 0, events: [], wakeLock: null, retryTimer: null, fps: 0
 };
 
 function camLog(msg){
@@ -252,6 +260,7 @@ async function startCamera(){
   saveSettings();
   show('cam');
   store.set('autostart', '1');
+  C.rotation = parseInt(store.get('rotation', '0')) || 0;
   const lines = [];
   if (S.publicUrl) lines.push('🌍 From anywhere:\n' + S.publicUrl.split('#')[0] + '#view=' + S.room);
   if (IN_APP && lanBase()) lines.push('🏠 On the same Wi-Fi:\n' + lanBase() + '#view=' + S.room);
@@ -297,7 +306,32 @@ async function startCamera(){
 function sizeOverlay(){
   const v = $('camVideo'), c = $('camOverlay');
   c.width = v.videoWidth; c.height = v.videoHeight;
-  $('camStage').style.aspectRatio = `${v.videoWidth}/${v.videoHeight}`;
+  applyRotation($('camStage'), $('camRot'), v.videoWidth, v.videoHeight, C.rotation);
+}
+
+/* Rotate the picture by 0/90/180/270°, resizing the frame to fit. */
+function applyRotation(stage, rot, vw, vh, deg){
+  if (!vw || !vh) return;
+  const side = deg % 180 !== 0;
+  stage.style.aspectRatio = side ? `${vh}/${vw}` : `${vw}/${vh}`;
+  // the inner box is rotated, so when sideways its width must equal the frame's height
+  rot.style.width  = side ? stage.clientHeight + 'px' : '100%';
+  rot.style.height = side ? stage.clientWidth + 'px' : '100%';
+  rot.style.transform = `translate(-50%,-50%) rotate(${deg}deg)`;
+}
+function reapplyRotation(){
+  if (!$('cam').classList.contains('hidden')) sizeOverlay();
+  if (!$('view').classList.contains('hidden')) viewRotate();
+}
+window.addEventListener('resize', reapplyRotation);
+document.addEventListener('fullscreenchange', () => setTimeout(reapplyRotation, 100));
+
+function rotateCamera(){
+  C.rotation = (C.rotation + 90) % 360;
+  store.set('rotation', String(C.rotation));
+  sizeOverlay();
+  broadcast({ type: 'rotate', deg: C.rotation });
+  camLog('Rotation: ' + C.rotation + '°');
 }
 
 async function detectLoop(){
@@ -307,7 +341,7 @@ async function detectLoop(){
   try {
     if (v.readyState >= 2 && C.model){
       const preds = await C.model.detect(v, 10, 0.3);
-      const people = preds.filter(p => p.class === 'person' && p.score >= parseFloat(S.threshold));
+      const people = preds.filter(p => p.class === TARGET && p.score >= parseFloat(S.threshold));
       drawBoxes(people);
       handleDetections(people);
     }
@@ -327,7 +361,7 @@ function drawBoxes(people){
     const [x, y, w, h] = p.bbox;
     g.strokeStyle = '#ff4d4f'; g.strokeRect(x, y, w, h);
     g.fillStyle = '#ff4d4f';
-    const label = `person ${Math.round(p.score * 100)}%`;
+    const label = `${TARGET} ${Math.round(p.score * 100)}%`;
     g.fillRect(x, y - parseInt(g.font) - 6, g.measureText(label).width + 10, parseInt(g.font) + 6);
     g.fillStyle = '#fff'; g.fillText(label, x + 5, y - 6);
   }
@@ -337,12 +371,12 @@ function handleDetections(people){
   const badge = $('camBadge');
   if (people.length){
     C.personStreak++;
-    badge.textContent = `Person detected (${people.length})`; badge.className = 'badge alert';
+    badge.textContent = `🐱 Cat detected (${people.length})`; badge.className = 'badge alert';
   } else {
     C.personStreak = 0;
     badge.textContent = C.armed ? 'Watching' : 'Watching (alerts off)'; badge.className = 'badge live';
   }
-  broadcast({ type: 'status', people: people.length, armed: C.armed });
+  broadcast({ type: 'status', people: people.length, armed: C.armed, rot: C.rotation });
 
   // require 2 consecutive positive checks to cut down false alarms
   const now = Date.now();
@@ -360,6 +394,20 @@ function snapshot(maxW = 1280, quality = 0.75, withBoxes = true){
   const g = c.getContext('2d');
   g.drawImage(v, 0, 0, c.width, c.height);
   if (withBoxes) g.drawImage($('camOverlay'), 0, 0, c.width, c.height);
+  return stampTime(rotateCanvas(c, C.rotation));
+}
+function rotateCanvas(src, deg){
+  if (!deg) return src;
+  const side = deg % 180 !== 0;
+  const c = document.createElement('canvas');
+  c.width = side ? src.height : src.width; c.height = side ? src.width : src.height;
+  const g = c.getContext('2d');
+  g.translate(c.width / 2, c.height / 2); g.rotate(deg * Math.PI / 180);
+  g.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+function stampTime(c){
+  const g = c.getContext('2d');
   g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, c.height - 26, 210, 26);
   g.fillStyle = '#fff'; g.font = '15px system-ui';
   g.fillText(new Date().toLocaleString(), 8, c.height - 8);
@@ -375,13 +423,13 @@ async function triggerAlert(people){
   C.events.unshift(ev); C.events = C.events.slice(0, 20);
   renderEvents($('camEvents'), C.events);
   broadcast({ type: 'event', ev });
-  camLog(`ALERT: ${n} person(s) detected`);
+  camLog(`ALERT: ${n} ${plural(n)} detected`);
   if (!C.armed) return;
   try {
     const blob = await toBlob(snapshot(1280, 0.75), 0.75);
     await sendNtfy({
-      title: '🚨 Person detected',
-      message: `${n} person${n > 1 ? 's' : ''} seen at ${timeStr(t)}. Tap to view live.`,
+      title: '🐱 Cat detected',
+      message: `${n} ${plural(n)} seen at ${timeStr(t)}. Tap to view live.`,
       blob, click: viewerUrl(S.room)
     });
     camLog('Notification sent');
@@ -403,7 +451,7 @@ function connectPeer(){
     conn.on('open', () => {
       C.conns.add(conn);
       camLog('Viewer connected');
-      conn.send({ type: 'hello', events: C.events, armed: C.armed });
+      conn.send({ type: 'hello', events: C.events, armed: C.armed, rot: C.rotation });
       const call = peer.call(conn.peer, C.stream);
       C.calls.add(call);
       call.on('close', () => C.calls.delete(call));
@@ -487,7 +535,7 @@ function stopCamera(){
 /* =====================================================================
    VIEWER MODE
    ===================================================================== */
-const V = { peer: null, conn: null, room: null, retry: null, events: [], lastStatus: 0 };
+const V = { rot: 0, peer: null, conn: null, room: null, retry: null, events: [], lastStatus: 0 };
 
 function setViewBadge(text, cls){ const b = $('viewBadge'); b.textContent = text; b.className = 'badge ' + (cls || ''); }
 
@@ -531,10 +579,12 @@ let battText = '';
 function onCamMsg(d){
   if (!d || !d.type) return;
   V.lastStatus = Date.now();
+  if (typeof d.rot === 'number' && d.rot !== V.rot){ V.rot = d.rot; viewRotate(); }
+  if (d.type === 'rotate'){ V.rot = d.deg; viewRotate(); }
   if (d.type === 'hello'){ V.events = d.events || []; renderEvents($('viewEvents'), V.events); }
   if (d.type === 'event'){ V.events.unshift(d.ev); V.events = V.events.slice(0, 20); renderEvents($('viewEvents'), V.events); }
   if (d.type === 'status' && $('viewVideo').srcObject){
-    if (d.people) setViewBadge(`🚨 Person detected (${d.people})`, 'alert'); else setViewBadge('● LIVE', 'live');
+    if (d.people) setViewBadge(`🐱 Cat detected (${d.people})`, 'alert'); else setViewBadge('● LIVE', 'live');
     $('viewStat').textContent = (d.armed ? 'Alerts on' : 'Alerts off') + battText;
   }
   if (d.type === 'battery'){ battText = ` · 🔋 ${d.level}%${d.charging ? '⚡' : ''}`; }
@@ -545,6 +595,13 @@ function onCamMsg(d){
   }
 }
 
+function viewRotate(){
+  const v = $('viewVideo');
+  applyRotation($('viewStage'), $('viewRot'), v.videoWidth, v.videoHeight, V.rot);
+}
+$('viewVideo').addEventListener('loadedmetadata', viewRotate);
+$('viewVideo').addEventListener('resize', viewRotate);
+
 function renderEvents(el, events){
   el.innerHTML = '';
   if (!events.length){ el.innerHTML = '<span class="hint">None yet.</span>'; return; }
@@ -552,7 +609,7 @@ function renderEvents(el, events){
     const d = document.createElement('div'); d.className = 'ev';
     const img = document.createElement('img'); img.src = e.thumb; img.alt = 'detection';
     const cap = document.createElement('div');
-    cap.textContent = `${new Date(e.t).toLocaleDateString([], {month:'short', day:'numeric'})} ${timeStr(e.t)} · ${e.n} person${e.n > 1 ? 's' : ''}`;
+    cap.textContent = `${new Date(e.t).toLocaleDateString([], {month:'short', day:'numeric'})} ${timeStr(e.t)} · ${e.n} ${plural(e.n)}`;
     d.append(img, cap); el.appendChild(d);
   }
 }
@@ -570,6 +627,7 @@ $('startCam').onclick = startCamera;
 $('startView').onclick = () => { saveSettings(); location.hash = 'view=' + S.room; };
 $('stopCam').onclick = stopCamera;
 $('flipBtn').onclick = flipCamera;
+$('rotBtn').onclick = rotateCamera;
 $('armBtn').onclick = () => { C.armed = !C.armed; $('armBtn').textContent = C.armed ? '🔔 Alerts ON' : '🔕 Alerts OFF'; };
 $('copyLink').onclick = async () => {
   try { await navigator.clipboard.writeText(viewerUrl(S.room)); $('copyLink').textContent = 'Copied!'; }
@@ -583,7 +641,11 @@ $('blackout').addEventListener('touchend', e => { const n = Date.now(); if (n - 
 
 $('unmuteBtn').onclick = () => { const v = $('viewVideo'); v.muted = !v.muted; $('unmuteBtn').textContent = v.muted ? '🔇 Unmute' : '🔊 Mute'; };
 $('snapBtn').onclick = () => { if (V.conn && V.conn.open) V.conn.send({ type: 'snap' }); };
-$('fsBtn').onclick = () => { const v = $('viewVideo'); (v.requestFullscreen || v.webkitEnterFullscreen || (()=>{})).call(v); };
+$('fsBtn').onclick = () => {
+  const st = $('viewStage'), v = $('viewVideo');
+  if (st.requestFullscreen) st.requestFullscreen().catch(()=>{});
+  else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();  // older iPhones: no rotation in fullscreen
+};
 $('homeBtn').onclick = () => { location.hash = ''; location.reload(); };
 
 function route(){

@@ -59,7 +59,7 @@ jobs:
       - name: Prepare site
         run: mkdir site && cp app/src/main/assets/index.html site/index.html
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: site
       - id: deploy
